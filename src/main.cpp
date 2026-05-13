@@ -40,6 +40,11 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
+// [BLE] BLE-Fernbedienung Support (nur im ble-Build aktiv)
+#ifdef ENABLE_BLE_HID
+#include "BleManager.h"
+#endif
+
 MappedInputManager mappedInputManager(gpio);
 GfxRenderer renderer(display);
 ActivityManager activityManager(renderer, mappedInputManager);
@@ -221,26 +226,18 @@ static bool screenshotComboHandled = false;
 // Pre-condition: isWakeupByPowerButton() == true
 void verifyPowerButtonDuration() {
   if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP) {
-    // Fast path for short press
-    // Needed because inputManager.isPressed() may take up to ~500ms to return the correct state
     return;
   }
 
-  // Give the user up to 1000ms to start holding the power button, and must hold for
-  // SETTINGS.getPowerButtonWakeDuration()
   const auto start = millis();
   bool abort = false;
-  // Subtract the current time, because inputManager only starts counting the HeldTime from the first update()
-  // This way, we remove the time we already took to reach here from the duration,
-  // assuming the button was held until now from millis()==0 (i.e. device start time).
   const uint16_t calibration = start;
   const uint16_t calibratedPressDuration =
       (calibration < SETTINGS.getPowerButtonWakeDuration()) ? SETTINGS.getPowerButtonWakeDuration() - calibration : 1;
 
   gpio.update();
-  // Needed because inputManager.isPressed() may take up to ~500ms to return the correct state
   while (!gpio.isPressed(HalGPIO::BTN_POWER) && millis() - start < 1000) {
-    delay(10);  // only wait 10ms each iteration to not delay too much in case of short configured duration.
+    delay(10);
     gpio.update();
   }
 
@@ -256,11 +253,10 @@ void verifyPowerButtonDuration() {
   }
 
   if (abort) {
-    // Button released too early. Returning to sleep.
-    // IMPORTANT: Re-arm the wakeup trigger before sleeping again
     powerManager.startDeepSleep(gpio);
   }
 }
+
 void waitForPowerRelease() {
   gpio.update();
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {
@@ -403,9 +399,8 @@ namespace {
 constexpr uint16_t POST_SLEEP_SCREEN_SETTLE_MS = 500;
 }
 
-// Enter deep sleep mode
 void enterDeepSleep() {
-  HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+  HalPowerManager::Lock powerLock;
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   APP_STATE.saveToFile();
 
@@ -427,7 +422,6 @@ void setupDisplayAndFonts() {
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
 
-  // Initialize font decompressor for compressed reader fonts
   if (!fontDecompressor.init()) {
     LOG_ERR("MAIN", "Font decompressor init failed");
   }
@@ -491,7 +485,6 @@ void setupDisplayAndFonts() {
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
 
-  // Discover and load SD card fonts
   sdFontSystem.begin(renderer);
 
   LOG_DBG("MAIN", "Fonts setup");
@@ -517,8 +510,6 @@ void setup() {
 
   LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
 
-  // SD Card Initialization
-  // We need 6 open files concurrently when parsing a new chapter
   if (!Storage.begin()) {
     LOG_ERR("MAIN", "SD card initialization failed");
     setupDisplayAndFonts();
@@ -535,6 +526,12 @@ void setup() {
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
+  // [BLE] BLE-Manager initialisieren (nach Storage.begin, vor Display)
+#ifdef ENABLE_BLE_HID
+  BleManager::begin();
+  LOG_INF("MAIN", "BLE HID Manager initialized");
+#endif
+
   const auto wakeupReason = gpio.getWakeupReason();
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
@@ -543,25 +540,17 @@ void setup() {
                                    SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
-      // If USB power caused a cold boot, go back to sleep
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
       powerManager.startDeepSleep(gpio);
       break;
     case HalGPIO::WakeupReason::AfterFlash:
-      // After flashing, just proceed to boot
     case HalGPIO::WakeupReason::Other:
     default:
       break;
   }
 
-  // Recovery firmware mode: hold left side button (BTN_UP) together with the power button at
-  // boot to skip directly to the SD-card firmware update screen. Useful on devices where USB
-  // flashing has been locked down (e.g. recent X3 firmware).
   bool recoveryFirmwareMode = false;
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton) {
-    // Refresh the cached button state a few times — isPressed() needs ~half a second to settle
-    // after boot per the HalGPIO contract. Use a millis-based deadline so we always wait the full
-    // settle window even if the loop body takes longer than expected on slow boots.
     const unsigned long settleStart = millis();
     while (millis() - settleStart < 500) {
       gpio.update();
@@ -573,7 +562,6 @@ void setup() {
     }
   }
 
-  // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
 
   setupDisplayAndFonts();
@@ -584,19 +572,14 @@ void setup() {
   RECENT_BOOKS.loadFromFile();
 
   if (recoveryFirmwareMode) {
-    // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(
         std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInputManager, /*recoveryMode=*/true));
   } else if (HalSystem::isRebootFromPanic()) {
-    // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
   } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
-    // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
-    // crashed (indicated by readerActivityLoadCount > 0)
     activityManager.goHome();
   } else {
-    // Clear app state to avoid getting into a boot loop if the epub doesn't load
     const auto path = APP_STATE.openEpubPath;
     APP_STATE.openEpubPath = "";
     APP_STATE.readerActivityLoadCount++;
@@ -604,7 +587,6 @@ void setup() {
     activityManager.goToReader(path);
   }
 
-  // Ensure we're not still holding the power button before leaving setup
   waitForPowerRelease();
 }
 
@@ -624,8 +606,6 @@ void loop() {
     lastMemPrint = millis();
   }
 
-  // Handle incoming serial commands,
-  // nb: we use logSerial from logging to avoid deprecation warnings
   if (logSerial.available() > 0) {
     String line = logSerial.readStringUntil('\n');
     if (line.startsWith("CMD:")) {
@@ -641,13 +621,23 @@ void loop() {
     }
   }
 
-  // Check for any user activity (button press or release) or active background work
+  // [BLE] Benutzeraktivität tracken für Auto-Reconnect
+  const bool userInputDetected = gpio.wasAnyPressed() || gpio.wasAnyReleased();
+
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || halTiltSensor.hadActivity() ||
-      activityManager.preventAutoSleep()) {
-    lastActivityTime = millis();         // Reset inactivity timer
-    powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
+  if (userInputDetected || halTiltSensor.hadActivity() || activityManager.preventAutoSleep()
+#ifdef ENABLE_BLE_HID
+      || BleManager::hasRecentActivity()  // [BLE] BLE-Aktivität verhindert Auto-Sleep
+#endif
+  ) {
+    lastActivityTime = millis();
+    powerManager.setPowerSaving(false);
   }
+
+  // [BLE] BLE maintenance jeden loop-Durchlauf
+#ifdef ENABLE_BLE_HID
+  BleManager::update(userInputDetected);
+#endif
 
   static bool screenshotButtonsReleased = true;
   static bool screenshotComboActive = false;
@@ -687,9 +677,6 @@ void loop() {
   if (millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep();
-    // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
-    // In the simulator, deep sleep is a no-op and returns — reset the timer so
-    // the main loop does not immediately re-trigger auto-sleep.
     lastActivityTime = millis();
     return;
   }
@@ -699,8 +686,6 @@ void loop() {
     return;
   }
 
-  // Refresh the battery icon when USB is plugged or unplugged.
-  // Placed after sleep guards so we never queue a render that won't be processed.
   if (gpio.wasUsbStateChanged()) {
     activityManager.requestUpdate();
   }
@@ -722,19 +707,14 @@ void loop() {
     }
   }
 
-  // Add delay at the end of the loop to prevent tight spinning
-  // When an activity requests skip loop delay (e.g., webserver running), use yield() for faster response
-  // Otherwise, use longer delay to save power
   if (activityManager.skipLoopDelay()) {
-    powerManager.setPowerSaving(false);  // Make sure we're at full performance when skipLoopDelay is requested
-    yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
+    powerManager.setPowerSaving(false);
+    yield();
   } else {
     if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
-      // If we've been inactive for a while, increase the delay to save power
-      powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
+      powerManager.setPowerSaving(true);
       delay(50);
     } else {
-      // Short delay to prevent tight loop while still being responsive
       delay(10);
     }
   }
