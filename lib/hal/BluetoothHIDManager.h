@@ -2,10 +2,12 @@
 #ifdef ENABLE_BLE_HID
 
 #include <Arduino.h>
-#include <string>
-#include <vector>
+
 #include <functional>
 #include <map>
+#include <string>
+#include <vector>
+
 #include "DeviceProfiles.h"
 
 // Forward declarations
@@ -25,20 +27,20 @@ struct ConnectedDevice {
   std::string name;
   NimBLEClient* client = nullptr;
   std::vector<NimBLERemoteCharacteristic*> reportChars;
-  unsigned long connectedTime = 0;    // Timestamp when BLE link was established
+  unsigned long connectedTime = 0;  // Timestamp when BLE link was established
   bool subscribed = false;
-  unsigned long lastActivityTime = 0;  // Timestamp of last HID report received
-  uint8_t lastHIDKeycode = 0x00;       // Track last keycode to detect press/release transitions
-  unsigned long lastInjectionTime = 0; // Cooldown for button injection to prevent flooding
-  uint8_t lastInjectedKeycode = 0x00;  // Track last injected key for smarter cooldown
-  bool wasConnected = false;           // Track if this device was previously connected for auto-reconnect
-  bool hasSeenRelease = false;         // Ignore startup noise until a release frame is seen
-  bool lastButtonState = false;        // Track button pressed state (from byte[0])
+  unsigned long lastActivityTime = 0;   // Timestamp of last HID report received
+  uint8_t lastHIDKeycode = 0x00;        // Track last keycode to detect press/release transitions
+  unsigned long lastInjectionTime = 0;  // Cooldown for button injection to prevent flooding
+  uint8_t lastInjectedKeycode = 0x00;   // Track last injected key for smarter cooldown
+  bool wasConnected = false;            // Track if this device was previously connected for auto-reconnect
+  bool hasSeenRelease = false;          // Ignore startup noise until a release frame is seen
+  bool lastButtonState = false;         // Track button pressed state (from byte[0])
   const DeviceProfiles::DeviceProfile* profile = nullptr;  // Device-specific HID profile
 };
 
 class BluetoothHIDManager {
-public:
+ public:
   // Singleton access
   static BluetoothHIDManager& getInstance();
 
@@ -64,9 +66,9 @@ public:
   void setInputCallback(std::function<void(uint16_t keycode)> callback);
   void setButtonInjector(std::function<void(uint8_t buttonIndex)> injector);
   void setBondedDevice(const std::string& address, const std::string& name = "");
-  void updateActivity();  // Call periodically to check inactivity timeout
+  void updateActivity();                                    // Call periodically to check inactivity timeout
   void checkAutoReconnect(bool userInputDetected = false);  // Reconnect bonded device when disconnected
-  
+
   // Check if BLE has had activity recently (within last 4 minutes)
   // Used by power manager to prevent sleep during BLE use
   bool hasRecentActivity() const;
@@ -81,7 +83,7 @@ public:
   void onScanResult(NimBLEAdvertisedDevice* advertisedDevice);
   static void onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t* pData, size_t length, bool isNotify);
 
-private:
+ private:
   BluetoothHIDManager();
   ~BluetoothHIDManager();
   BluetoothHIDManager(const BluetoothHIDManager&) = delete;
@@ -100,7 +102,7 @@ private:
   std::function<void(uint8_t)> _buttonInjector;
   std::string _bondedDeviceAddress;
   std::string _bondedDeviceName;
-  
+
   // Inactivity timeout (milliseconds)
   static constexpr unsigned long INACTIVITY_TIMEOUT_MS = 300000;  // 5 minutes
   unsigned long lastMaintenanceCheck = 0;
