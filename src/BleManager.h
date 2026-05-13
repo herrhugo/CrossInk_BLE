@@ -6,8 +6,9 @@
 
 #ifdef ENABLE_BLE_HID
 
-#include "BluetoothHIDManager.h"
 #include <HalGPIO.h>
+
+#include "BluetoothHIDManager.h"
 
 namespace BleManager {
 
@@ -17,9 +18,7 @@ inline void begin() {
   ble.loadState();
 
   // Button-Injector: simuliert physische Tastendrücke über HalGPIO
-  ble.setButtonInjector([](uint8_t buttonIndex) {
-    gpio.injectButton(buttonIndex);
-  });
+  ble.setButtonInjector([](uint8_t buttonIndex) { gpio.injectButton(buttonIndex); });
 }
 
 // Muss jeden loop()-Durchlauf aufgerufen werden
@@ -31,9 +30,7 @@ inline void update(bool userInputDetected) {
 }
 
 // Gibt true zurück wenn BLE gerade aktiv ist (verhindert Auto-Sleep)
-inline bool hasRecentActivity() {
-  return BluetoothHIDManager::getInstance().hasRecentActivity();
-}
+inline bool hasRecentActivity() { return BluetoothHIDManager::getInstance().hasRecentActivity(); }
 
 }  // namespace BleManager
 
