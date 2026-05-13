@@ -6,7 +6,7 @@
 
 #ifdef ENABLE_BLE_HID
 
-#include "hal/BluetoothHIDManager.h"
+#include "BluetoothHIDManager.h"
 #include <HalGPIO.h>
 
 namespace BleManager {
