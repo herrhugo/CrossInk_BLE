@@ -109,29 +109,17 @@ bool BluetoothHIDManager::enable() {
     delay(100);  // Brief delay to ensure WiFi is fully powered down
   }
   
-  try {
-    // Initialize NimBLE stack
-    NimBLEDevice::init("CrossPoint");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9); // +9dBm
-    NimBLEDevice::setSecurityAuth(true, false, true);
-    
-    _enabled = true;
-    lastError = "";
-    
-    LOG_INF("BT", "Bluetooth enabled successfully");
-    loadState();
-    return true;
-  } catch (const std::exception& e) {
-    LOG_ERR("BT", "Failed to enable Bluetooth: %s", e.what());
-    lastError = std::string("Init failed: ") + e.what();
-    _enabled = false;
-    return false;
-  } catch (...) {
-    LOG_ERR("BT", "Failed to enable Bluetooth: unknown error");
-    lastError = "Init failed: unknown error";
-    _enabled = false;
-    return false;
-  }
+  // Initialize NimBLE stack
+  NimBLEDevice::init("CrossPoint");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9); // +9dBm
+  NimBLEDevice::setSecurityAuth(true, false, true);
+
+  _enabled = true;
+  lastError = "";
+
+  LOG_INF("BT", "Bluetooth enabled successfully");
+  loadState();
+  return true;
 }
 
 bool BluetoothHIDManager::disable() {
@@ -171,48 +159,42 @@ void BluetoothHIDManager::startScan(uint32_t durationMs) {
   _scanning = true;
   _discoveredDevices.clear();
   
-  try {
-    NimBLEScan* pScan = NimBLEDevice::getScan();
-    if (!pScan) {
-      LOG_ERR("BT", "Failed to get scan object");
-      _scanning = false;
-      return;
-    }
-    
-    LOG_DBG("BT", "Setting up scan callbacks...");
-    // Use static callbacks object to ensure it stays alive
-    pScan->setScanCallbacks(&scanCallbacks, false);
-    pScan->setActiveScan(true);
-    pScan->setInterval(100);
-    pScan->setWindow(99);
-    
-    LOG_DBG("BT", "Starting continuous scan (duration: 0 = continuous)...");
-    // In NimBLE 2.x, duration=0 means scan continuously until stop() is called
-    // Parameter 1: 0 = continuous scan
-    // Parameter 2: isContinue (false = clear old results)
-    bool started = pScan->start(0, false);
-    
-    if (!started) {
-      LOG_ERR("BT", "Failed to start scan!");
-      _scanning = false;
-      return;
-    }
-    
-    LOG_DBG("BT", "Scan started, waiting %lu ms...", durationMs);
-    // Wait for the specified duration
-    delay(durationMs);
-    
-    LOG_DBG("BT", "Stopping scan after %lu ms...", durationMs);
-    // Stop the scan
-    pScan->stop();
-    
+  NimBLEScan* pScan = NimBLEDevice::getScan();
+  if (!pScan) {
+    LOG_ERR("BT", "Failed to get scan object");
     _scanning = false;
-    LOG_INF("BT", "Scan complete, found %d devices", _discoveredDevices.size());
-  } catch (const std::exception& e) {
-    LOG_ERR("BT", "Scan failed: %s", e.what());
-    _scanning = false;
-    lastError = std::string("Scan failed: ") + e.what();
+    return;
   }
+
+  LOG_DBG("BT", "Setting up scan callbacks...");
+  // Use static callbacks object to ensure it stays alive
+  pScan->setScanCallbacks(&scanCallbacks, false);
+  pScan->setActiveScan(true);
+  pScan->setInterval(100);
+  pScan->setWindow(99);
+
+  LOG_DBG("BT", "Starting continuous scan (duration: 0 = continuous)...");
+  // In NimBLE 2.x, duration=0 means scan continuously until stop() is called
+  // Parameter 1: 0 = continuous scan
+  // Parameter 2: isContinue (false = clear old results)
+  bool started = pScan->start(0, false);
+
+  if (!started) {
+    LOG_ERR("BT", "Failed to start scan!");
+    _scanning = false;
+    return;
+  }
+
+  LOG_DBG("BT", "Scan started, waiting %lu ms...", durationMs);
+  // Wait for the specified duration
+  delay(durationMs);
+
+  LOG_DBG("BT", "Stopping scan after %lu ms...", durationMs);
+  // Stop the scan
+  pScan->stop();
+
+  _scanning = false;
+  LOG_INF("BT", "Scan complete, found %d devices", _discoveredDevices.size());
 }
 
 void BluetoothHIDManager::stopScan() {
@@ -220,13 +202,9 @@ void BluetoothHIDManager::stopScan() {
   
   LOG_INF("BT", "Stopping scan");
   
-  try {
-    NimBLEScan* pScan = NimBLEDevice::getScan();
-    if (pScan) {
-      pScan->stop();
-    }
-  } catch (...) {
-    LOG_ERR("BT", "Error stopping scan");
+  NimBLEScan* pScan = NimBLEDevice::getScan();
+  if (pScan) {
+    pScan->stop();
   }
   
   _scanning = false;
@@ -283,8 +261,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   
   LOG_INF("BT", "Connecting to device %s", address.c_str());
   
-  try {
-    // Create client
+  // Create client
     NimBLEClient* pClient = NimBLEDevice::createClient();
     if (!pClient) {
       lastError = "Failed to create BLE client";
@@ -414,16 +391,6 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
     LOG_INF("BT", "Successfully connected to %s", address.c_str());
     lastError = "Connected";
     return true;
-    
-  } catch (const std::exception& e) {
-    lastError = std::string("Connection error: ") + e.what();
-    LOG_ERR("BT", "%s", lastError.c_str());
-    return false;
-  } catch (...) {
-    lastError = "Unknown connection error";
-    LOG_ERR("BT", "%s", lastError.c_str());
-    return false;
-  }
 }
 
 bool BluetoothHIDManager::disconnectFromDevice(const std::string& address) {
@@ -438,16 +405,10 @@ bool BluetoothHIDManager::disconnectFromDevice(const std::string& address) {
     // Ensure normal CPU speed during BLE termination to avoid WDT in low-power mode.
     // Request self-delete so NimBLE frees the client object when disconnect completes.
     if (client && client->isConnected()) {
-      try {
-        HalPowerManager::Lock lock;
-        client->setSelfDelete(true, true);
-        LOG_DBG("BT", "Calling disconnect on client...");
-        client->disconnect();
-      } catch (const std::exception& e) {
-        LOG_ERR("BT", "Error during disconnect: %s", e.what());
-      } catch (...) {
-        LOG_ERR("BT", "Unknown error during disconnect");
-      }
+      HalPowerManager::Lock lock;
+      client->setSelfDelete(true, true);
+      LOG_DBG("BT", "Calling disconnect on client...");
+      client->disconnect();
     }
 
     // Remove from our list
