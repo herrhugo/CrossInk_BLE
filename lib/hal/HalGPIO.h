@@ -51,6 +51,7 @@ class HalGPIO {
 
  private:
   DeviceType _deviceType = DeviceType::X4;
+  uint8_t _injectedWasPressed = 0;
 
  public:
   HalGPIO() = default;
@@ -70,6 +71,9 @@ class HalGPIO {
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
+
+  // Simulate a button press for the current loop iteration (used by BLE HID)
+  void injectButton(uint8_t buttonIndex);
 
   // Setup wake up GPIO and enter deep sleep
   void startDeepSleep();
